@@ -201,7 +201,7 @@
   ;; new := NEW NAME OPAREN optExprList CPAREN
   (let* ([class-name (second (third new-expr))]
          [class (lookup-name env class-name)]
-         [rand-exprs (rest (rest new-expr))]
+         [rand-exprs (rest (eval-optExprList 0 (fifth new-expr) env))]
          [field-names (collect-field-names class)]
          [class-env (fourth class)]
          [object-env (add-field-bindings (hash-copy class-env) field-names)]
@@ -243,9 +243,80 @@
 ;;; method call helper functions
 ;;;
 
+(define (call-method object method-name rand-exprs rand-env)
+  (let* ([class (first object)]
+         [method-class (find-method-class-or-fail class method-name)])
+    (call-method2 object method-class method-name rand-exprs rand-env)))
+
+(define (call-method2 object method-class method-name rand-exprs rand-env)
+  (let* ([method-table (third method-class)]
+         [method-info (hash-ref method-table method-name)]
+         [method-params (first method-info)]
+         [method-body (second method-info)]
+         [method-body-as-begin-expr (cons 'begin method-body)]
+         [args (eval-rand-exprs rand-exprs rand-env)]
+         [object-env (second object)]
+         [env-with-this (add-binding object-env 'this object)]
+         [object-env-with-parameter-bindings (add-bindings env-with-this
+                                                           method-params
+                                                           args)]
+         [super-method-class (first method-class)]
+         [method-env (add-binding object-env-with-parameter-bindings
+                                  'super
+                                  (list method-name super-method-class))])
+    (eval-begin method-body-as-begin-expr method-env)))
+
+(define (find-method-class-or-fail class method-name)
+  (or (find-method class method-name)
+      (error (~a "Method not found: " method-name))))
+
+(define (find-method class method-name)
+  (let ([superclass (first class)]
+        [method-table (third class)])
+    (if (not superclass)
+        #f
+        (if (hash-has-key? method-table method-name)
+            class
+            (find-method superclass method-name)))))
+
 ;;;
 ;;; other OOP helper functions
 ;;;
+
+(define (collect-field-names class)
+  (let ([superclass (first class)]
+        [field-names (second class)])
+    (if (not superclass)
+        field-names
+        (remove-duplicates (append field-names
+                                   (collect-field-names superclass))))))
+
+;;;;
+;;;; evaluation helper functions
+;;;;
+
+(define (eval-begin begin-expr env)
+  ;; (begin expr+)
+  (let ([first-expr (second begin-expr)]
+        [other-exprs (rest (rest begin-expr))])
+    (if (empty? other-exprs)
+        (eval-expr first-expr env)
+        (begin
+          (eval-expr first-expr env)
+          (eval-begin (cons 'begin other-exprs)
+                      env)))))
+
+(define (invoke-builtin-function invocation-expr env)
+  (let* ([eval-arg-expr (lambda (expr) (eval-expr expr env))]
+         [rator (first invocation-expr)]
+         [fn (if (equal? '+ rator) + (if (equal? 'add1 rator) add1 string-append))]
+         [arg-exprs (rest invocation-expr)]
+         [args (map eval-arg-expr arg-exprs)])
+    (apply fn args)))
+
+(define (eval-rand-exprs rand-exprs env)
+  (let ([eval-rand-expr (lambda (expr) (eval-expr expr env))])
+    (map eval-rand-expr rand-exprs)))
 
 ;;;
 ;;; repl and tests
