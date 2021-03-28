@@ -5,7 +5,7 @@
 ;;;
 (require (only-in (file "parse.rkt") parse))
 
-(provide eval repl)
+; (provide eval repl)
 
 (module+ test (require rackunit))
 
@@ -28,15 +28,20 @@
         env)
       (error (~a "Cannot update nonexistent name " name))))
 
-(define (new-environment-with-object%)
+(define (new-environment-with-object)
   (let* ([new-env (new-environment)]
-         [object% (list
+         [method-table (make-hash)]
+         [method-table (add-binding method-table
+                                 'initialize
+                                 (list '() '()))]
+         [object (list
                    #f          ; 1. superclass
                    '()         ; 2. field-names
-                   (make-hash) ; 3. method-table
+                   method-table ; 3. method-table
                    new-env     ; 4. defining-environment
                    )])
-    (add-binding new-env 'object% object%)))
+    (println method-table)
+    (add-binding new-env 'Object object)))
 
 (define (add-bindings env names values)
   (if (empty? names)
@@ -55,7 +60,7 @@
 ;;;
 
 (define (eval code)
-  (eval-program (parse code) (new-environment-with-object%)))
+  (eval-program (parse code) (new-environment-with-object)))
 
 ;;;
 ;;; evaluation functions
@@ -86,6 +91,7 @@
 
 (define (eval-optExprList value optExprList-expr env)
   ;; optExprList := ɛ | exprList
+  (println value)
   (cons value (if (empty? (rest optExprList-expr))
                 null
                 (eval-exprList (second optExprList-expr) env))))
@@ -176,6 +182,10 @@
 (define (eval-class class-expr env)
   ;; class  := CLASS NAME OPAREN optNameList CPAREN OBRACE optMethodList CBRACE
   ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+  (println "**************************")
+  (println (second (third class-expr)))
+  (println "**************************")
+  (println env)
   (let* ([superclass-name (second (third class-expr))]
          [superclass (lookup-name env superclass-name)]
          [field-names (eval-optNameList (fifth class-expr) env)]
@@ -237,7 +247,7 @@
 
 (define (eval-optNameList optNameList-expr env)
   ;; optNameList := ɛ | nameList
-  (if (null? (second optNameList-expr))
+  (if (null? (rest optNameList-expr))
       null
       (eval-nameList (second optNameList-expr) env)))
 
@@ -248,7 +258,7 @@
   
 (define (eval-optMethodList optMethodList-expr env)
   ;; optMethodList := ɛ | methodList
-  (if (null? (second optMethodList-expr))
+  (if (null? (rest optMethodList-expr))
       null
       (eval-methodList (second optMethodList-expr) env)))
 
@@ -260,7 +270,7 @@
 (define (eval-method method-expr env)
   ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
   (let* ([name (second (second method-expr))]
-         [params (eval-optNameList (fourth method-expr))]
+         [params (eval-optNameList (fourth method-expr) env)]
          [body (seventh method-expr)])
     (list name params body)))
 
@@ -299,7 +309,11 @@
   (let ([superclass (first class)]
         [method-table (third class)])
     (if (not superclass)
-        #f
+        ;; root class
+        (if (hash-has-key? method-table method-name)
+            class
+            #f)
+        ;; not root class
         (if (hash-has-key? method-table method-name)
             class
             (find-method superclass method-name)))))
@@ -339,170 +353,186 @@
          [args (map eval-arg-expr arg-exprs)])
     (apply fn args)))
 
-;; takes optExprList
+;; rand-exprs is optExprList from new or send
 (define (eval-rand-exprs rand-exprs env)
   (let ([eval-rand-expr (lambda (expr) (eval-expr expr env))])
+    (println "*********")
+    (println rand-exprs)
+    (println "*********")
     (map eval-rand-expr rand-exprs)))
+
+(define (eval-rand-exprs2 rand-exprs env)
+  (letrec ([helper
+            (lambda (expr)
+              (if (null? (rest expr))
+                  null
+                  (cons (eval-expr (second (first (rest expr)))
+                                   env)
+                        (helper (third (first (rest expr)))))))])
+    (println "*********")
+    (println rand-exprs)
+    (println "*********")
+    (helper rand-exprs)))
 
 ;;;
 ;;; repl and tests
 ;;;
 
-(define (repl)
-  (parameterize ([current-read-interaction (lambda (_ in)
-                                             (read-line in))]
-                 [current-eval (lambda (e)
-                                 (when (non-empty-string? (cdr e))
-                                   (eval (cdr e))))])
-    (read-eval-print-loop)))
-
-(module+ test
-  (check-equal? (eval "7") 7)
-  (check-equal? (eval "7.7") 7.7)
-  (check-equal? (eval "\"a string\"") "a string")
-  (check-exn exn:fail? (thunk (eval "foo")))
-  (check-exn exn:fail? (thunk (eval "(list)")))
-  (check-equal? (eval "7 8") 8)
-  (check-equal? (eval "(+)") 0)
-  (check-equal? (eval "(+ 7)") 7)
-  (check-equal? (eval "(+ 7 8)") 15)
-  (check-equal? (eval "(+ 7 8 15.0)") 30.0)
-  (check-exn exn:fail? (thunk (eval "(-)")))
-  (check-equal? (eval "(- 7)") -7)
-  (check-equal? (eval "(- 7 -8)") 15)
-  (check-equal? (eval "(- 7 -8 15.0)") 0.0)
-  (check-equal? (eval "(*)") 1)
-  (check-equal? (eval "(* 7)") 7)
-  (check-equal? (eval "(* 7 8)") 56)
-  (check-equal? (eval "(* 7 8 15.0)") 840.0)
-  (check-exn exn:fail? (thunk (eval "(/)")))
-  (check-exn exn:fail? (thunk (eval "(/ 1 0)")))
-  (check-equal? (eval "(/ 7)") 1/7)
-  (check-equal? (eval "(/ 7 8)") 7/8)
-  (check-equal? (eval "(/ 7 8 15.0)") (/ 7 8 15.0))
-  (check-equal? (eval "(+ 7 (- 8 1))") (+ 7 (- 8 1)))
-  (check-equal? (eval "(+ 7 (+ 8 1)) (+ 7 (- 8 1))") (+ 7 (- 8 1)))
-  (check-equal? (eval "(string-append)") "")
-  (check-equal? (eval "(string-append \"abc\")") "abc")
-  (check-equal? (eval "(string-append \"abc\" \"def\")") (string-append "abc" "def"))
-  (check-equal? (eval "(string-append \"abc\" \"def\" \"ghi\")") (string-append "abc" "def" "ghi"))
-  (check-exn exn:fail? (thunk (eval "(string<?)")))
-  (check-equal? (eval "(string<? \"abc\")") #t)
-  (check-equal? (eval "(string<? \"abc\" \"def\")") (string<? "abc" "def"))
-  (check-equal? (eval "(string<? \"def\" \"abc\")") (string<? "def" "abc"))
-  (check-equal? (eval "(string<? \"abc\" \"def\" \"ghi\")") (string<? "abc" "def" "ghi"))
-  (check-exn exn:fail? (thunk (eval "(string=?)")))
-  (check-equal? (eval "(string=? \"abc\")") #t)
-  (check-equal? (eval "(string=? \"abc\" \"def\")") (string=? "abc" "def"))
-  (check-equal? (eval "(string=? \"abc\" \"abc\")") (string=? "abc" "abc"))
-  (check-equal? (eval "(string=? \"abc\" \"def\" \"ghi\")") (string=? "abc" "def" "ghi"))
-  (check-exn exn:fail? (thunk (eval "(not)")))
-  (check-exn exn:fail? (thunk (eval "(not 1 2)")))
-  (check-equal? (eval "(not 1)") #f)
-  (check-equal? (eval "(not 1.0)") #f)
-  (check-equal? (eval "(not (= 0 1))") #t)
-  (check-exn exn:fail? (thunk (eval "(=)")))
-  (check-equal? (eval "(= 1)") #t)
-  (check-equal? (eval "(= 0 1)") #f)
-  (check-equal? (eval "(= 1.0 1)") #t)
-  (check-equal? (eval "(= 0 1 2)") #f)
-  (check-equal? (eval "(= (+ 1 0) 1 (- 2 1))") #t)
-  (check-exn exn:fail? (thunk (eval "(<)")))
-  (check-equal? (eval "(< 1)") #t)
-  (check-equal? (eval "(< 1 0)") #f)
-  (check-equal? (eval "(< 0 1)") #t)
-  (check-equal? (eval "(< 0 1 2)") #t)
-  (check-equal? (eval "(< 0 1 2.0)") #t)
-  (check-equal? (eval "(< (+ 1 0) 1 (- 2 1))") #f)
-
-  (check-equal? (eval "(+ 7 (+ 8 1)) (+ 7 (- 8 1)) (< 1 1 1) \"end\"") "end")
-
-  (check-equal? (eval "let (x (+ 1 2)) (+ x 3)") 6)
-  ;; these are allowed to be implementation defined, so I just return a
-  ;; procedure; there are other ways to proceed
-  #;(check-equal? (eval "lambda (x) (* x x)")
-                (list 'x
-                      '(expr
-                         (invocation
-                           (OPAREN #f)
-                           (exprList
-                             (expr (atom (NAME *)))
-                             (optExprList
-                               (exprList
-                                 (expr (atom (NAME x)))
-                                 (optExprList (exprList (expr (atom (NAME x))) (optExprList))))))
-                           (CPAREN #f)))
-                      (new-environment)))
-  #;(check-equal? (eval "let (y 1) lambda (x) (* y x)")
-                (list 'x
-                      '(expr
-                         (invocation
-                           (OPAREN #f)
-                           (exprList
-                             (expr (atom (NAME *)))
-                             (optExprList
-                               (exprList
-                                 (expr (atom (NAME y)))
-                                 (optExprList (exprList (expr (atom (NAME x))) (optExprList))))))
-                           (CPAREN #f)))
-                      #hash((y . 1))))
-  (check-equal? (eval "(lambda (x) (* x x) 7)") 49)
-  (check-equal? (eval "let (square lambda (x) (* x x)) (square 7)") 49)
-  (check-equal? (eval "define foo 3") 3)
-  (check-equal? (eval "define foo 3 foo") 3)
-  (check-equal? (eval "define foo 3 4") 4)
-  (check-equal? (eval "define foo 3 (+ 1 foo)") 4)
-  (check-equal? (eval "define foo (/ 8 2) let (x (+ 1 2)) (+ x foo)") 7))
-
-(module+ test ;; massive integration test: recursive factorial via Church encodings
-  (let ([program #<<EOF
-
-define Z
-  lambda (f)
-    let (A lambda (x) (f lambda (v) ((x x) v)))
-      (A A)
-
-define czero lambda (f) lambda (x) x
-define cone lambda (f) lambda (x) (f x)
-
-define csucc lambda (n) lambda (f) lambda (x) (f ((n f) x))
-define cplus lambda (m) lambda (n) lambda (f) lambda (x) ((m f) ((n f) x))
-define cpred lambda (n) lambda (f) lambda (x) (((n lambda (g) lambda (h) (h (g f))) lambda (u) x) lambda (u) u)
-define cmult lambda (m) lambda (n) lambda (f) (m (n f))
-
-define c-to-nat
-  lambda (n)
-    ((n lambda (n) (+ n 1)) 0)
-
-define ctrue lambda (a) lambda (b) a
-define cfalse lambda (a) lambda (b) b
-
-define c-to-bool
-  lambda (b)
-    ((b (= 1 1)) (= 0 1))
-
-define czero? lambda (n) ((n lambda (x) cfalse) ctrue)
-
-define cif lambda (p) lambda (a) lambda (b) ((p a) b)
-
-define !-prime
-  lambda (f)
-    lambda (n)
-      ((((cif (czero? n))
-         lambda (x) cone)
-        lambda (x) ((cmult n) (f (cpred n))))
-       ;; this last just forces the thunk returned by cif
-       ;; eta-expansion required because otherwise all arguments are fully
-       ;; evaluated
-       czero)
-
-define ! (Z !-prime)
-define c7 (csucc (csucc (csucc (csucc (csucc (csucc cone))))))
-
-(c-to-nat (! c7))
-
-EOF
-])
-    (check-equal? (eval program)
-                  ;; 7!
-                  5040)))
+;(define (repl)
+;  (parameterize ([current-read-interaction (lambda (_ in)
+;                                             (read-line in))]
+;                 [current-eval (lambda (e)
+;                                 (when (non-empty-string? (cdr e))
+;                                   (eval (cdr e))))])
+;    (read-eval-print-loop)))
+;
+;(module+ test
+;  (check-equal? (eval "7") 7)
+;  (check-equal? (eval "7.7") 7.7)
+;  (check-equal? (eval "\"a string\"") "a string")
+;  (check-exn exn:fail? (thunk (eval "foo")))
+;  (check-exn exn:fail? (thunk (eval "(list)")))
+;  (check-equal? (eval "7 8") 8)
+;  (check-equal? (eval "(+)") 0)
+;  (check-equal? (eval "(+ 7)") 7)
+;  (check-equal? (eval "(+ 7 8)") 15)
+;  (check-equal? (eval "(+ 7 8 15.0)") 30.0)
+;  (check-exn exn:fail? (thunk (eval "(-)")))
+;  (check-equal? (eval "(- 7)") -7)
+;  (check-equal? (eval "(- 7 -8)") 15)
+;  (check-equal? (eval "(- 7 -8 15.0)") 0.0)
+;  (check-equal? (eval "(*)") 1)
+;  (check-equal? (eval "(* 7)") 7)
+;  (check-equal? (eval "(* 7 8)") 56)
+;  (check-equal? (eval "(* 7 8 15.0)") 840.0)
+;  (check-exn exn:fail? (thunk (eval "(/)")))
+;  (check-exn exn:fail? (thunk (eval "(/ 1 0)")))
+;  (check-equal? (eval "(/ 7)") 1/7)
+;  (check-equal? (eval "(/ 7 8)") 7/8)
+;  (check-equal? (eval "(/ 7 8 15.0)") (/ 7 8 15.0))
+;  (check-equal? (eval "(+ 7 (- 8 1))") (+ 7 (- 8 1)))
+;  (check-equal? (eval "(+ 7 (+ 8 1)) (+ 7 (- 8 1))") (+ 7 (- 8 1)))
+;  (check-equal? (eval "(string-append)") "")
+;  (check-equal? (eval "(string-append \"abc\")") "abc")
+;  (check-equal? (eval "(string-append \"abc\" \"def\")") (string-append "abc" "def"))
+;  (check-equal? (eval "(string-append \"abc\" \"def\" \"ghi\")") (string-append "abc" "def" "ghi"))
+;  (check-exn exn:fail? (thunk (eval "(string<?)")))
+;  (check-equal? (eval "(string<? \"abc\")") #t)
+;  (check-equal? (eval "(string<? \"abc\" \"def\")") (string<? "abc" "def"))
+;  (check-equal? (eval "(string<? \"def\" \"abc\")") (string<? "def" "abc"))
+;  (check-equal? (eval "(string<? \"abc\" \"def\" \"ghi\")") (string<? "abc" "def" "ghi"))
+;  (check-exn exn:fail? (thunk (eval "(string=?)")))
+;  (check-equal? (eval "(string=? \"abc\")") #t)
+;  (check-equal? (eval "(string=? \"abc\" \"def\")") (string=? "abc" "def"))
+;  (check-equal? (eval "(string=? \"abc\" \"abc\")") (string=? "abc" "abc"))
+;  (check-equal? (eval "(string=? \"abc\" \"def\" \"ghi\")") (string=? "abc" "def" "ghi"))
+;  (check-exn exn:fail? (thunk (eval "(not)")))
+;  (check-exn exn:fail? (thunk (eval "(not 1 2)")))
+;  (check-equal? (eval "(not 1)") #f)
+;  (check-equal? (eval "(not 1.0)") #f)
+;  (check-equal? (eval "(not (= 0 1))") #t)
+;  (check-exn exn:fail? (thunk (eval "(=)")))
+;  (check-equal? (eval "(= 1)") #t)
+;  (check-equal? (eval "(= 0 1)") #f)
+;  (check-equal? (eval "(= 1.0 1)") #t)
+;  (check-equal? (eval "(= 0 1 2)") #f)
+;  (check-equal? (eval "(= (+ 1 0) 1 (- 2 1))") #t)
+;  (check-exn exn:fail? (thunk (eval "(<)")))
+;  (check-equal? (eval "(< 1)") #t)
+;  (check-equal? (eval "(< 1 0)") #f)
+;  (check-equal? (eval "(< 0 1)") #t)
+;  (check-equal? (eval "(< 0 1 2)") #t)
+;  (check-equal? (eval "(< 0 1 2.0)") #t)
+;  (check-equal? (eval "(< (+ 1 0) 1 (- 2 1))") #f)
+;
+;  (check-equal? (eval "(+ 7 (+ 8 1)) (+ 7 (- 8 1)) (< 1 1 1) \"end\"") "end")
+;
+;  (check-equal? (eval "let (x (+ 1 2)) (+ x 3)") 6)
+;  ;; these are allowed to be implementation defined, so I just return a
+;  ;; procedure; there are other ways to proceed
+;  #;(check-equal? (eval "lambda (x) (* x x)")
+;                (list 'x
+;                      '(expr
+;                         (invocation
+;                           (OPAREN #f)
+;                           (exprList
+;                             (expr (atom (NAME *)))
+;                             (optExprList
+;                               (exprList
+;                                 (expr (atom (NAME x)))
+;                                 (optExprList (exprList (expr (atom (NAME x))) (optExprList))))))
+;                           (CPAREN #f)))
+;                      (new-environment)))
+;  #;(check-equal? (eval "let (y 1) lambda (x) (* y x)")
+;                (list 'x
+;                      '(expr
+;                         (invocation
+;                           (OPAREN #f)
+;                           (exprList
+;                             (expr (atom (NAME *)))
+;                             (optExprList
+;                               (exprList
+;                                 (expr (atom (NAME y)))
+;                                 (optExprList (exprList (expr (atom (NAME x))) (optExprList))))))
+;                           (CPAREN #f)))
+;                      #hash((y . 1))))
+;  (check-equal? (eval "(lambda (x) (* x x) 7)") 49)
+;  (check-equal? (eval "let (square lambda (x) (* x x)) (square 7)") 49)
+;  (check-equal? (eval "define foo 3") 3)
+;  (check-equal? (eval "define foo 3 foo") 3)
+;  (check-equal? (eval "define foo 3 4") 4)
+;  (check-equal? (eval "define foo 3 (+ 1 foo)") 4)
+;  (check-equal? (eval "define foo (/ 8 2) let (x (+ 1 2)) (+ x foo)") 7))
+;
+;(module+ test ;; massive integration test: recursive factorial via Church encodings
+;  (let ([program #<<EOF
+;
+;define Z
+;  lambda (f)
+;    let (A lambda (x) (f lambda (v) ((x x) v)))
+;      (A A)
+;
+;define czero lambda (f) lambda (x) x
+;define cone lambda (f) lambda (x) (f x)
+;
+;define csucc lambda (n) lambda (f) lambda (x) (f ((n f) x))
+;define cplus lambda (m) lambda (n) lambda (f) lambda (x) ((m f) ((n f) x))
+;define cpred lambda (n) lambda (f) lambda (x) (((n lambda (g) lambda (h) (h (g f))) lambda (u) x) lambda (u) u)
+;define cmult lambda (m) lambda (n) lambda (f) (m (n f))
+;
+;define c-to-nat
+;  lambda (n)
+;    ((n lambda (n) (+ n 1)) 0)
+;
+;define ctrue lambda (a) lambda (b) a
+;define cfalse lambda (a) lambda (b) b
+;
+;define c-to-bool
+;  lambda (b)
+;    ((b (= 1 1)) (= 0 1))
+;
+;define czero? lambda (n) ((n lambda (x) cfalse) ctrue)
+;
+;define cif lambda (p) lambda (a) lambda (b) ((p a) b)
+;
+;define !-prime
+;  lambda (f)
+;    lambda (n)
+;      ((((cif (czero? n))
+;         lambda (x) cone)
+;        lambda (x) ((cmult n) (f (cpred n))))
+;       ;; this last just forces the thunk returned by cif
+;       ;; eta-expansion required because otherwise all arguments are fully
+;       ;; evaluated
+;       czero)
+;
+;define ! (Z !-prime)
+;define c7 (csucc (csucc (csucc (csucc (csucc (csucc cone))))))
+;
+;(c-to-nat (! c7))
+;
+;EOF
+;])
+;    (check-equal? (eval program)
+;                  ;; 7!
+;                  5040)))
