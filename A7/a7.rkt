@@ -355,13 +355,6 @@
 
 ;; rand-exprs is optExprList from new or send
 (define (eval-rand-exprs rand-exprs env)
-  (let ([eval-rand-expr (lambda (expr) (eval-expr expr env))])
-    (println "*********")
-    (println rand-exprs)
-    (println "*********")
-    (map eval-rand-expr rand-exprs)))
-
-(define (eval-rand-exprs2 rand-exprs env)
   (letrec ([helper
             (lambda (expr)
               (if (null? (rest expr))
