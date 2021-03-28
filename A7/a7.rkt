@@ -178,8 +178,8 @@
 ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
   (let* ([superclass-name (second (third class-expr))]
          [superclass (lookup-name env superclass-name)]
-         [field-names (eval-optNameList (fifth class-expr))]
-         [method-exprs (eval-optMethodList (eighth class-expr))]
+         [field-names (eval-optNameList (fifth class-expr) env)]
+         [method-exprs (eval-optMethodList (eighth class-expr) env)]
          [method-table (make-hash
                         (for/list ([method-expr method-exprs])
                           (let ([method-name(first method-expr)]
@@ -201,7 +201,7 @@
   ;; new := NEW NAME OPAREN optExprList CPAREN
   (let* ([class-name (second (third new-expr))]
          [class (lookup-name env class-name)]
-         [rand-exprs (rest (eval-optExprList 0 (fifth new-expr) env))]
+         [rand-exprs (fifth new-expr)]
          [field-names (collect-field-names class)]
          [class-env (fourth class)]
          [object-env (add-field-bindings (hash-copy class-env) field-names)]
@@ -209,12 +209,23 @@
     (call-method object 'initialize rand-exprs env)
     object))
 
-(define (eval-send) 1)
-;; send        := SEND NAME NAME OPAREN optExprList CPAREN
+(define (eval-send send-expr env)
+  ;; send := SEND NAME NAME OPAREN optExprList CPAREN
+  (let* ([object-name (third send-expr)]
+         [method-name (fourth send-expr)]
+         [rand-exprs (sixth send-expr)]
+         [object (lookup-name env object-name)])
+    (call-method object method-name rand-exprs env)))
 
-(define (eval-super) 1)
-;; super       := SUPER OPAREN optExprList CPAREN
-
+(define (eval-super super-expr env)
+  ;; super := SUPER OPAREN optExprList CPAREN
+  (let* ([object (lookup-name env 'this)]
+         [super-method-info (lookup-name env 'super)]
+         [method-name (first super-method-info)]
+         [relative-class (second super-method-info)]
+         [method-class (find-method-class-or-fail relative-class method-name)]
+         [rand-exprs (fourth super-expr)])
+    (call-method2 object method-class method-name rand-exprs env)))
 
 (define (eval-set set-expr env)
   ;; set := SET NAME expr
@@ -224,15 +235,20 @@
          [val (eval-expr expr-expr env)])
     (update-binding env name val)))
 
-(define (eval-optNameList) 1)
-;; optNameList := ɛ | nameList
+(define (eval-optNameList optNameList-expr env)
+  ;; optNameList := ɛ | nameList
+  (if (null? (second optNameList-expr))
+      null
+      (eval-nameList (second optNameList-expr) env)))
 
-(define (eval-nameList) 1)
-;; nameList    := NAME optNameList
-
-(define (eval-optMethodList) 1)
-;; optMethodList := ɛ | methodList
-
+(define (eval-nameList nameList-expr env)
+  ;; nameList := NAME optNameList
+  (cons (second (second nameList-expr))
+        (eval-optNameList (third nameList-expr) env)))
+  
+(define (eval-optMethodList)
+  ;; optMethodList := ɛ | methodList
+  
 (define (eval-methodList) 1)
 ;; methodList  := method optMethodList
 
