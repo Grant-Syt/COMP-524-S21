@@ -174,8 +174,8 @@
 ;; 2. the body of the method
 
 (define (eval-class class-expr env)
-;; class  := CLASS NAME OPAREN optNameList CPAREN OBRACE optMethodList CBRACE
-;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+  ;; class  := CLASS NAME OPAREN optNameList CPAREN OBRACE optMethodList CBRACE
+  ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
   (let* ([superclass-name (second (third class-expr))]
          [superclass (lookup-name env superclass-name)]
          [field-names (eval-optNameList (fifth class-expr) env)]
@@ -246,15 +246,23 @@
   (cons (second (second nameList-expr))
         (eval-optNameList (third nameList-expr) env)))
   
-(define (eval-optMethodList)
+(define (eval-optMethodList optMethodList-expr env)
   ;; optMethodList := ɛ | methodList
-  1)
+  (if (null? (second optMethodList-expr))
+      null
+      (eval-methodList (second optMethodList-expr) env)))
 
-(define (eval-methodList) 1)
-;; methodList  := method optMethodList
+(define (eval-methodList methodList-expr env)
+  ;; methodList := method optMethodList
+  (cons (eval-method (second methodList-expr) env)
+        (eval-optMethodList (third methodList-expr) env)))
 
-(define (eval-method) 1)
-;; method      := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+(define (eval-method method-expr env)
+  ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+  (let* ([name (second (second method-expr))]
+         [params (eval-optNameList (fourth method-expr))]
+         [body (seventh method-expr)])
+    (list name params body)))
 
 ;;;
 ;;; method call helper functions
@@ -331,6 +339,7 @@
          [args (map eval-arg-expr arg-exprs)])
     (apply fn args)))
 
+;; takes optExprList
 (define (eval-rand-exprs rand-exprs env)
   (let ([eval-rand-expr (lambda (expr) (eval-expr expr env))])
     (map eval-rand-expr rand-exprs)))
