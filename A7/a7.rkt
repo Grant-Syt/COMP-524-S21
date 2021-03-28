@@ -1,21 +1,65 @@
 #lang racket
 
-;; starter code for A7, including:
-;; 1. a parser that works with the A7 grammar:
+;;;
+;;; setup
+;;;
 (require (only-in (file "parse.rkt") parse))
-
-;; 2. A6 solution code (everything below):
 
 (provide eval repl)
 
 (module+ test (require rackunit))
 
-(define new-environment hash)
-(define add-binding hash-set)
+;;;
+;;; environment implementation and environment helper functions
+;;;
+
+(define new-environment make-hash)
+
+(define (add-binding env name value)
+  (hash-set! env name value)
+  env)
+
 (define lookup-name hash-ref)
 
-(define (eval code-string)
-  (eval-program (parse code-string) (new-environment)))
+(define (update-binding env name value)
+  (if (hash-has-key? env name)
+      (begin
+        (hash-set! env name value)
+        env)
+      (error (~a "Cannot update nonexistent name " name))))
+
+(define (new-environment-with-object%)
+  (let* ([new-env (new-environment)]
+         [object% (list
+                   #f          ; 1. superclass
+                   '()         ; 2. field-names
+                   (make-hash) ; 3. method-table
+                   new-env     ; 4. defining-environment
+                   )])
+    (add-binding new-env 'object% object%)))
+
+(define (add-bindings env names values)
+  (if (empty? names)
+      env
+      (add-bindings (add-binding env (first names) (first values))
+                    (rest names) (rest values))))
+
+(define (add-field-bindings env field-names)
+  (if (empty? field-names)
+      env
+      (add-field-bindings (add-binding env (first field-names) (void))
+                          (rest field-names))))
+
+;;;
+;;; top-level evaluation function
+;;;
+
+(define (eval code)
+  (eval-program (parse code) (new-environment-with-object%)))
+
+;;;
+;;; evaluation functions
+;;;
 
 (define (eval-program program-expr env)
   ;; program     := exprList
@@ -47,7 +91,7 @@
                 (eval-exprList (second optExprList-expr) env))))
 
 (define (eval-expr expr-expr env)
-  ;; expr        := atom | invocation | let | define | lambda
+  ;; expr := atom | invocation | let | define | lambda | class | new | send | super | set
   (let* ([expr-to-eval (second expr-expr)]
          [tag (first expr-to-eval)]
          [evaluator (case tag
@@ -55,7 +99,12 @@
                       [(invocation) eval-invocation]
                       [(let) eval-let]
                       ;; define case is handled in `eval-exprList`
-                      [(lambda) eval-lambda])])
+                      [(lambda) eval-lambda]
+                      [(class) eval-class]
+                      [(new) eval-new]
+                      [(send) eval-send]
+                      [(super) eval-super]
+                      [(set) eval-set])])
     (evaluator expr-to-eval env)))
 
 (define (eval-atom atom-expr env)
@@ -112,6 +161,95 @@
          [rator (first values)]
          [rands (rest values)])
     (apply rator rands)))
+
+;; We represent a Class internally as a list with 4 items:
+;; 1. superclass
+;; 2. field-names
+;; 3. method-table
+;; 4. defining-environment
+
+;; The method table is a hash-table whose keys are method names (as symbols) and
+;; whose values are method info tuples, which are lists containing two items:
+;; 1. the list of parameter names of the method
+;; 2. the body of the method
+
+(define (eval-class class-expr env)
+;; class  := CLASS NAME OPAREN optNameList CPAREN OBRACE optMethodList CBRACE
+;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+  (let* ([superclass-name (second (third class-expr))]
+         [superclass (lookup-name env superclass-name)]
+         [field-names (eval-optNameList (fifth class-expr))]
+         [method-exprs (eval-optMethodList (eighth class-expr))]
+         [method-table (make-hash
+                        (for/list ([method-expr method-exprs])
+                          (let ([method-name(first method-expr)]
+                                [method-params (second method-expr)]
+                                [method-body (rest (rest method-expr))])
+                            (cons method-name
+                                  (list method-params method-body)))))])
+    (list superclass
+          field-names
+          method-table
+          (hash-copy env))))
+
+;; We represent an Object internally as a list with 2 items:
+;; 1. the class it was created from
+;; 2. the defining environment, extended to include bindings for each of the
+;;    fields
+
+(define (eval-new new-expr env)
+  ;; new := NEW NAME OPAREN optExprList CPAREN
+  (let* ([class-name (second (third new-expr))]
+         [class (lookup-name env class-name)]
+         [rand-exprs (rest (rest new-expr))]
+         [field-names (collect-field-names class)]
+         [class-env (fourth class)]
+         [object-env (add-field-bindings (hash-copy class-env) field-names)]
+         [object (list class object-env)])
+    (call-method object 'initialize rand-exprs env)
+    object))
+
+(define (eval-send) 1)
+;; send        := SEND NAME NAME OPAREN optExprList CPAREN
+
+(define (eval-super) 1)
+;; super       := SUPER OPAREN optExprList CPAREN
+
+
+(define (eval-set set-expr env)
+  ;; set := SET NAME expr
+  (let* ([name-token (third set-expr)]
+         [name (second name-token)]
+         [expr-expr (fourth set-expr)]
+         [val (eval-expr expr-expr env)])
+    (update-binding env name val)))
+
+(define (eval-optNameList) 1)
+;; optNameList := ɛ | nameList
+
+(define (eval-nameList) 1)
+;; nameList    := NAME optNameList
+
+(define (eval-optMethodList) 1)
+;; optMethodList := ɛ | methodList
+
+(define (eval-methodList) 1)
+;; methodList  := method optMethodList
+
+(define (eval-method) 1)
+;; method      := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
+
+;;;
+;;; method call helper functions
+;;;
+
+;;;
+;;; other OOP helper functions
+;;;
+
+;;;
+;;; repl and tests
+;;;
 
 (define (repl)
   (parameterize ([current-read-interaction (lambda (_ in)
