@@ -72,12 +72,14 @@
   (if (null? (rest program-expr))
       null
       (let ([output (eval-exprList (second program-expr) env)])
-        (println "******************Input: ")
-        (println program-expr)
-        (println "******************Output: ")
-        (println output)
-        (println "******************Last: ")
-        (println (last output))
+;        (println "******************Input: ")
+;        (println program-expr)
+;        (println "******************Output: ")
+;        (println output)
+;        (println "******************Output Length: ")
+;        (println (length output))
+;        (println "******************Last: ")
+;        (println (last output))
         (last output))))
 
 (define (eval-exprList exprList-expr env)
@@ -91,7 +93,7 @@
              [name (second (third define-expr))]
              [value-expr (fourth define-expr)]
              [new-env (add-binding env name (eval-expr value-expr env))])
-        (eval-optExprList (lookup-name new-env name)
+        (eval-optExprList (lookup-name new-env name) ;; class becomes return value
                           optExprList-expr
                           new-env))
       ;; normal stuff
