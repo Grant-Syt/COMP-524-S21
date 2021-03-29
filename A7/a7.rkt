@@ -314,7 +314,9 @@
          [method-env (add-binding object-env-with-parameter-bindings
                                   'super
                                   (list method-name super-method-class))])
-    (eval-program method-body-as-program-expr method-env)))
+    (if (equal? (length args) (length method-params))
+        (eval-program method-body-as-program-expr method-env)
+        (error "args/params arity mismatch"))))
 
 (define (find-method-class-or-fail class method-name)
   (or (find-method class method-name)
