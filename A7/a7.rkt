@@ -68,7 +68,9 @@
 
 (define (eval-program program-expr env)
   ;; program     := exprList
-  (last (eval-exprList (second program-expr) env)))
+  (if (null? (rest program-expr))
+      null
+      (last (eval-exprList (second program-expr) env))))
 
 (define (eval-exprList exprList-expr env)
   ;; exprList    := expr optExprList
@@ -221,8 +223,8 @@
 
 (define (eval-send send-expr env)
   ;; send := SEND NAME NAME OPAREN optExprList CPAREN
-  (let* ([object-name (third send-expr)]
-         [method-name (fourth send-expr)]
+  (let* ([object-name (second (third send-expr))]
+         [method-name (second (fourth send-expr))]
          [rand-exprs (sixth send-expr)]
          [object (lookup-name env object-name)])
     (call-method object method-name rand-exprs env)))
@@ -288,7 +290,7 @@
          [method-info (hash-ref method-table method-name)]
          [method-params (first method-info)]
          [method-body (second method-info)]
-         [method-body-as-begin-expr (cons 'begin method-body)]
+         [method-body-as-program-expr (cons 'program method-body)]
          [args (eval-rand-exprs rand-exprs rand-env)]
          [object-env (second object)]
          [env-with-this (add-binding object-env 'this object)]
@@ -299,7 +301,7 @@
          [method-env (add-binding object-env-with-parameter-bindings
                                   'super
                                   (list method-name super-method-class))])
-    (eval-begin method-body-as-begin-expr method-env)))
+    (eval-program method-body-as-program-expr method-env)))
 
 (define (find-method-class-or-fail class method-name)
   (or (find-method class method-name)
@@ -333,17 +335,6 @@
 ;;;;
 ;;;; evaluation helper functions
 ;;;;
-
-(define (eval-begin begin-expr env)
-  ;; (begin expr+)
-  (let ([first-expr (second begin-expr)]
-        [other-exprs (rest (rest begin-expr))])
-    (if (empty? other-exprs)
-        (eval-expr first-expr env)
-        (begin
-          (eval-expr first-expr env)
-          (eval-begin (cons 'begin other-exprs)
-                      env)))))
 
 (define (invoke-builtin-function invocation-expr env)
   (let* ([eval-arg-expr (lambda (expr) (eval-expr expr env))]
