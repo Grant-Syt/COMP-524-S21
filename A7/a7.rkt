@@ -36,12 +36,12 @@
                                  'initialize
                                  (list '() '()))]
          [object (list
-                   #f          ; 1. superclass
-                   '()         ; 2. field-names
+                   #f           ; 1. superclass
+                   '()          ; 2. field-names
                    method-table ; 3. method-table
-                   new-env     ; 4. defining-environment
+                   new-env      ; 4. defining-environment
                    )])
-    (println method-table)
+;    (println method-table)
     (add-binding new-env 'Object object)))
 
 (define (add-bindings env names values)
@@ -71,7 +71,14 @@
   ;; program     := exprList
   (if (null? (rest program-expr))
       null
-      (last (eval-exprList (second program-expr) env))))
+      (let ([output (eval-exprList (second program-expr) env)])
+        (println "******************Input: ")
+        (println program-expr)
+        (println "******************Output: ")
+        (println output)
+        (println "******************Last: ")
+        (println (last output))
+        (last output))))
 
 (define (eval-exprList exprList-expr env)
   ;; exprList    := expr optExprList
@@ -94,7 +101,9 @@
 
 (define (eval-optExprList value optExprList-expr env)
   ;; optExprList := ɛ | exprList
-  (println value)
+;  (println "***************")
+;  (println value)
+;  (println "***************")
   (cons value (if (empty? (rest optExprList-expr))
                 null
                 (eval-exprList (second optExprList-expr) env))))
@@ -185,10 +194,10 @@
 (define (eval-class class-expr env)
   ;; class  := CLASS NAME OPAREN optNameList CPAREN OBRACE optMethodList CBRACE
   ;; method := NAME OPAREN optNameList CPAREN OBRACE exprList CBRACE
-  (println "**************************")
-  (println (second (third class-expr)))
-  (println "**************************")
-  (println env)
+;  (println "**************************")
+;  (println (second (third class-expr)))
+;  (println "**************************")
+;  (println env)
   (let* ([superclass-name (second (third class-expr))]
          [superclass (lookup-name env superclass-name)]
          [field-names (eval-optNameList (fifth class-expr) env)]
@@ -246,7 +255,8 @@
          [name (second name-token)]
          [expr-expr (fourth set-expr)]
          [val (eval-expr expr-expr env)])
-    (update-binding env name val)))
+    (update-binding env name val)
+    val))
 
 (define (eval-optNameList optNameList-expr env)
   ;; optNameList := ɛ | nameList
@@ -333,18 +343,6 @@
         (remove-duplicates (append field-names
                                    (collect-field-names superclass))))))
 
-;;;;
-;;;; evaluation helper functions
-;;;;
-
-(define (invoke-builtin-function invocation-expr env)
-  (let* ([eval-arg-expr (lambda (expr) (eval-expr expr env))]
-         [rator (first invocation-expr)]
-         [fn (if (equal? '+ rator) + (if (equal? 'add1 rator) add1 string-append))]
-         [arg-exprs (rest invocation-expr)]
-         [args (map eval-arg-expr arg-exprs)])
-    (apply fn args)))
-
 ;; rand-exprs is optExprList from new or send
 (define (eval-rand-exprs rand-exprs env)
   (letrec ([helper
@@ -354,9 +352,9 @@
                   (cons (eval-expr (second (first (rest expr)))
                                    env)
                         (helper (third (first (rest expr)))))))])
-    (println "*********")
-    (println rand-exprs)
-    (println "*********")
+;    (println "*********")
+;    (println rand-exprs)
+;    (println "*********")
     (helper rand-exprs)))
 
 ;;;
